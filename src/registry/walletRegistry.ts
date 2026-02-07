@@ -1,14 +1,16 @@
 /**
- * Handle-to-Wallet Registry
- * Maps Twitter handles to Solana wallet addresses
+ * Handle-to-Wallet Registry with Auto-Generated Wallets
+ * Maps Twitter handles to Solana wallets (bot-generated for custody)
  */
 
 import { promises as fs } from 'fs';
 import { join } from 'path';
+import { Keypair } from '@solana/web3.js';
 
 export interface WalletMapping {
   twitterHandle: string;
   solanaAddress: string;
+  privateKey: number[]; // Bot-custodied for hackathon demo
   createdAt: string;
   updatedAt: string;
 }
@@ -40,22 +42,70 @@ async function saveRegistry(registry: Map<string, WalletMapping>): Promise<void>
   registryCache = registry;
 }
 
+/**
+ * Generate a new wallet for a user (bot custody model)
+ * Returns the wallet info including private key (stored securely)
+ */
+export async function generateWallet(twitterHandle: string): Promise<WalletMapping> {
+  const registry = await loadRegistry();
+  const handleLower = twitterHandle.toLowerCase();
+
+  // Check if already registered
+  if (registry.has(handleLower)) {
+    throw new Error('User already registered');
+  }
+
+  // Generate new keypair
+  const keypair = Keypair.generate();
+  const solanaAddress = keypair.publicKey.toBase58();
+  const privateKey = Array.from(keypair.secretKey);
+
+  const now = new Date().toISOString();
+  const mapping: WalletMapping = {
+    twitterHandle: handleLower,
+    solanaAddress,
+    privateKey,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  registry.set(handleLower, mapping);
+  await saveRegistry(registry);
+
+  return mapping;
+}
+
+/**
+ * Get user's wallet address
+ */
 export async function getWalletAddress(twitterHandle: string): Promise<string | null> {
   const registry = await loadRegistry();
   const mapping = registry.get(twitterHandle.toLowerCase());
   return mapping?.solanaAddress || null;
 }
 
+/**
+ * Get user's full wallet mapping (including private key for transactions)
+ */
+export async function getWalletMapping(twitterHandle: string): Promise<WalletMapping | null> {
+  const registry = await loadRegistry();
+  return registry.get(twitterHandle.toLowerCase()) || null;
+}
+
+/**
+ * Register a user with an external wallet (legacy mode)
+ */
 export async function registerWallet(
   twitterHandle: string,
   solanaAddress: string
 ): Promise<WalletMapping> {
   const registry = await loadRegistry();
-  
+
   const now = new Date().toISOString();
   const mapping: WalletMapping = {
     twitterHandle: twitterHandle.toLowerCase(),
     solanaAddress,
+    privateKey: [], // No custody - user manages their own keys
     createdAt: registry.get(twitterHandle.toLowerCase())?.createdAt || now,
     updatedAt: now,
   };
@@ -66,21 +116,21 @@ export async function registerWallet(
   return mapping;
 }
 
+/**
+ * Check if user is registered
+ */
 export async function isWalletRegistered(twitterHandle: string): Promise<boolean> {
-  const address = await getWalletAddress(twitterHandle);
-  return address !== null;
+  const registry = await loadRegistry();
+  return registry.has(twitterHandle.toLowerCase());
 }
 
-// For MVP: Auto-register users on first deposit
-// In production, this should require signature verification
-export async function autoRegisterFromDeposit(
-  twitterHandle: string,
-  solanaAddress: string
-): Promise<WalletMapping> {
-  const existing = await getWalletAddress(twitterHandle);
-  if (existing) {
-    throw new Error('Handle already registered');
+/**
+ * Get keypair for a registered user (for bot-initiated transactions)
+ */
+export async function getUserKeypair(twitterHandle: string): Promise<Keypair | null> {
+  const mapping = await getWalletMapping(twitterHandle);
+  if (!mapping || mapping.privateKey.length === 0) {
+    return null;
   }
-
-  return registerWallet(twitterHandle, solanaAddress);
+  return Keypair.fromSecretKey(Uint8Array.from(mapping.privateKey));
 }

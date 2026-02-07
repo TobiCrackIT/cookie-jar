@@ -1,7 +1,10 @@
+#![allow(unexpected_cfgs)]
+
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("TipBot1111111111111111111111111111111111111");
+declare_id!("JDj9z4vXUj46cRX4UmnfLgV2fGNw2Qnjewr5qzgeHrSo");
 
 #[program]
 pub mod tipbot {
@@ -19,13 +22,12 @@ pub mod tipbot {
 
     /// Register a new user with their Twitter handle
     pub fn register_user(ctx: Context<RegisterUser>, twitter_handle: String) -> Result<()> {
-        require!(
-            twitter_handle.len() <= 32,
-            TipBotError::HandleTooLong
-        );
+        require!(twitter_handle.len() <= 32, TipBotError::HandleTooLong);
 
         let master_wallet = &mut ctx.accounts.master_wallet;
-        master_wallet.total_users = master_wallet.total_users.checked_add(1)
+        master_wallet.total_users = master_wallet
+            .total_users
+            .checked_add(1)
             .ok_or(TipBotError::MathOverflow)?;
 
         let user_account = &mut ctx.accounts.user_account;
@@ -35,40 +37,25 @@ pub mod tipbot {
         user_account.escrow_balance = 0;
         user_account.bump = ctx.bumps.user_account;
 
-        // Check if there's an existing escrow for this handle
-        if ctx.accounts.existing_escrow_account.amount > 0 {
-            // Transfer escrow to user's account
-            let escrow_amount = ctx.accounts.existing_escrow_account.amount;
-            
-            // Transfer tokens from escrow to user token account
-            let master_wallet_key = master_wallet.key();
-            let escrow_seeds = &[
-                b"escrow",
-                twitter_handle.as_bytes(),
-                master_wallet_key.as_ref(),
-                &[ctx.accounts.existing_escrow_account.bump],
-            ];
-            let escrow_signer = &[&escrow_seeds[..]];
-
-            let cpi_accounts = Transfer {
-                from: ctx.accounts.escrow_token_account.to_account_info(),
-                to: ctx.accounts.user_token_account.to_account_info(),
-                authority: ctx.accounts.existing_escrow_account.to_account_info(),
-            };
-            let cpi_ctx = CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                cpi_accounts,
-                escrow_signer,
+        let escrow_account = &mut ctx.accounts.escrow_account;
+        if escrow_account.recipient_twitter_handle.is_empty() {
+            escrow_account.recipient_twitter_handle = twitter_handle.clone();
+        } else {
+            require!(
+                escrow_account.recipient_twitter_handle == twitter_handle,
+                TipBotError::EscrowHandleMismatch
             );
-            token::transfer(cpi_ctx, escrow_amount)?;
-
-            // Update balances
-            user_account.balance = escrow_amount;
-            user_account.escrow_balance = escrow_amount;
-
-            // Close escrow account
-            ctx.accounts.existing_escrow_account.amount = 0;
         }
+        escrow_account.bump = ctx.bumps.escrow_account;
+
+        let expected_escrow_ata = anchor_spl::associated_token::get_associated_token_address(
+            &escrow_account.key(),
+            &ctx.accounts.mint.key(),
+        );
+        require!(
+            expected_escrow_ata == ctx.accounts.escrow_token_account.key(),
+            TipBotError::InvalidEscrowTokenAccount
+        );
 
         // Create token account for this user
         let cpi_accounts = anchor_spl::associated_token::Create {
@@ -85,6 +72,39 @@ pub mod tipbot {
         );
         anchor_spl::associated_token::create(cpi_ctx)?;
 
+        // Check if there's an existing escrow and claim it
+        let escrow_amount = escrow_account.amount;
+        if escrow_amount > 0 {
+            // Transfer from escrow to user
+            let master_key = master_wallet.key();
+            let escrow_seeds = &[
+                b"escrow",
+                twitter_handle.as_bytes(),
+                master_key.as_ref(),
+                &[escrow_account.bump],
+            ];
+            let escrow_signer = &[&escrow_seeds[..]];
+
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.escrow_token_account.to_account_info(),
+                to: ctx.accounts.user_token_account.to_account_info(),
+                authority: escrow_account.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi_accounts,
+                escrow_signer,
+            );
+            token::transfer(cpi_ctx, escrow_amount)?;
+
+            // Update balances
+            user_account.balance = escrow_amount;
+            user_account.escrow_balance = escrow_amount;
+
+            // Reset escrow
+            escrow_account.amount = 0;
+        }
+
         Ok(())
     }
 
@@ -95,38 +115,41 @@ pub mod tipbot {
             to: ctx.accounts.user_token_account.to_account_info(),
             authority: ctx.accounts.depositor.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            cpi_accounts,
-        );
+        let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
         token::transfer(cpi_ctx, amount)?;
 
         // Update user's balance record
         let user_account = &mut ctx.accounts.user_account;
-        user_account.balance = user_account.balance.checked_add(amount)
+        user_account.balance = user_account
+            .balance
+            .checked_add(amount)
             .ok_or(TipBotError::MathOverflow)?;
 
         Ok(())
     }
 
     /// Tip another registered user (transfer between accounts)
-    pub fn tip(
-        ctx: Context<Tip>,
-        amount: u64,
-        recipient_twitter_handle: String,
-    ) -> Result<()> {
+    pub fn tip(ctx: Context<Tip>, amount: u64, recipient_twitter_handle: String) -> Result<()> {
         require!(amount > 0, TipBotError::InvalidAmount);
+
+        require!(
+            ctx.accounts.recipient_user_account.twitter_handle == recipient_twitter_handle,
+            TipBotError::EscrowHandleMismatch
+        );
 
         let sender_balance = ctx.accounts.sender_user_account.balance;
         require!(sender_balance >= amount, TipBotError::InsufficientBalance);
 
         // Update balances
         let sender_account = &mut ctx.accounts.sender_user_account;
-        sender_account.balance = sender_balance.checked_sub(amount)
+        sender_account.balance = sender_balance
+            .checked_sub(amount)
             .ok_or(TipBotError::MathOverflow)?;
 
         let recipient_account = &mut ctx.accounts.recipient_user_account;
-        recipient_account.balance = recipient_account.balance.checked_add(amount)
+        recipient_account.balance = recipient_account
+            .balance
+            .checked_add(amount)
             .ok_or(TipBotError::MathOverflow)?;
 
         // Transfer tokens on-chain
@@ -166,27 +189,66 @@ pub mod tipbot {
 
         // Update sender balance
         let sender_account = &mut ctx.accounts.sender_user_account;
-        sender_account.balance = sender_balance.checked_sub(amount)
+        sender_account.balance = sender_balance
+            .checked_sub(amount)
             .ok_or(TipBotError::MathOverflow)?;
 
-        // Update or create escrow
         let escrow = &mut ctx.accounts.escrow_account;
-        escrow.amount = escrow.amount.checked_add(amount)
+        if escrow.recipient_twitter_handle.is_empty() {
+            escrow.recipient_twitter_handle = recipient_twitter_handle.clone();
+        } else {
+            require!(
+                escrow.recipient_twitter_handle == recipient_twitter_handle,
+                TipBotError::EscrowHandleMismatch
+            );
+        }
+        escrow.bump = ctx.bumps.escrow_account;
+
+        let expected_escrow_ata = anchor_spl::associated_token::get_associated_token_address(
+            &escrow.key(),
+            &ctx.accounts.mint.key(),
+        );
+        require!(
+            expected_escrow_ata == ctx.accounts.escrow_token_account.key(),
+            TipBotError::InvalidEscrowTokenAccount
+        );
+
+        // Update escrow balance
+        escrow.amount = escrow
+            .amount
+            .checked_add(amount)
             .ok_or(TipBotError::MathOverflow)?;
 
-        // Transfer tokens to escrow token account
-        let master_wallet_key = ctx.accounts.master_wallet.key();
+        let master_wallet = &mut ctx.accounts.master_wallet;
+        let master_wallet_key = master_wallet.key();
         let seeds = &[
             b"master_wallet",
             master_wallet_key.as_ref(),
-            &[ctx.accounts.master_wallet.bump],
+            &[master_wallet.bump],
         ];
         let signer = &[&seeds[..]];
+
+        // Create escrow token account if needed
+        if ctx.accounts.escrow_token_account.data_is_empty() {
+            let cpi_accounts = anchor_spl::associated_token::Create {
+                payer: ctx.accounts.sender.to_account_info(),
+                associated_token: ctx.accounts.escrow_token_account.to_account_info(),
+                authority: escrow.to_account_info(),
+                mint: ctx.accounts.mint.to_account_info(),
+                system_program: ctx.accounts.system_program.to_account_info(),
+                token_program: ctx.accounts.token_program.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new(
+                ctx.accounts.associated_token_program.to_account_info(),
+                cpi_accounts,
+            );
+            anchor_spl::associated_token::create(cpi_ctx)?;
+        }
 
         let cpi_accounts = Transfer {
             from: ctx.accounts.sender_token_account.to_account_info(),
             to: ctx.accounts.escrow_token_account.to_account_info(),
-            authority: ctx.accounts.master_wallet.to_account_info(),
+            authority: master_wallet.to_account_info(),
         };
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
@@ -196,7 +258,9 @@ pub mod tipbot {
         token::transfer(cpi_ctx, amount)?;
 
         // Update master wallet stats
-        ctx.accounts.master_wallet.total_escrows = ctx.accounts.master_wallet.total_escrows.checked_add(1)
+        master_wallet.total_escrows = master_wallet
+            .total_escrows
+            .checked_add(1)
             .ok_or(TipBotError::MathOverflow)?;
 
         Ok(())
@@ -211,7 +275,8 @@ pub mod tipbot {
 
         // Update balance
         let user_account = &mut ctx.accounts.user_account;
-        user_account.balance = user_balance.checked_sub(amount)
+        user_account.balance = user_balance
+            .checked_sub(amount)
             .ok_or(TipBotError::MathOverflow)?;
 
         // Transfer tokens
@@ -282,17 +347,15 @@ pub struct RegisterUser<'info> {
     pub user_token_account: UncheckedAccount<'info>,
     /// CHECK: Escrow account if exists
     #[account(
-        mut,
+        init_if_needed,
+        payer = owner,
+        space = 8 + EscrowAccount::SIZE,
         seeds = [b"escrow", twitter_handle.as_bytes(), master_wallet.key().as_ref()],
         bump
     )]
-    pub existing_escrow_account: Account<'info, EscrowAccount>,
+    pub escrow_account: Account<'info, EscrowAccount>,
     /// CHECK: Escrow token account
-    #[account(
-        mut,
-        associated_token::mint = mint,
-        associated_token::authority = existing_escrow_account
-    )]
+    #[account(mut)]
     pub escrow_token_account: UncheckedAccount<'info>,
     pub mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
@@ -400,13 +463,9 @@ pub struct TipToEscrow<'info> {
         associated_token::authority = master_wallet
     )]
     pub sender_token_account: Account<'info, TokenAccount>,
-    #[account(
-        init_if_needed,
-        payer = sender,
-        associated_token::mint = mint,
-        associated_token::authority = escrow_account
-    )]
-    pub escrow_token_account: Account<'info, TokenAccount>,
+    /// CHECK: Escrow token account, validated in instruction
+    #[account(mut)]
+    pub escrow_token_account: UncheckedAccount<'info>,
     pub mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -461,11 +520,11 @@ impl MasterWallet {
 
 #[account]
 pub struct UserAccount {
-    pub twitter_handle: String,  // 4 + 32 bytes max
-    pub owner: Pubkey,           // 32 bytes
-    pub balance: u64,            // 8 bytes
-    pub escrow_balance: u64,     // 8 bytes (amount received via escrow)
-    pub bump: u8,                // 1 byte
+    pub twitter_handle: String, // 4 + 32 bytes max
+    pub owner: Pubkey,          // 32 bytes
+    pub balance: u64,           // 8 bytes
+    pub escrow_balance: u64,    // 8 bytes
+    pub bump: u8,               // 1 byte
 }
 
 impl UserAccount {
@@ -474,9 +533,9 @@ impl UserAccount {
 
 #[account]
 pub struct EscrowAccount {
-    pub recipient_twitter_handle: String,  // 4 + 32 bytes
-    pub amount: u64,                       // 8 bytes
-    pub bump: u8,                          // 1 byte
+    pub recipient_twitter_handle: String, // 4 + 32 bytes
+    pub amount: u64,                      // 8 bytes
+    pub bump: u8,                         // 1 byte
 }
 
 impl EscrowAccount {
@@ -491,8 +550,10 @@ pub enum TipBotError {
     InvalidAmount,
     #[msg("Insufficient balance")]
     InsufficientBalance,
+    #[msg("Escrow handle mismatch")]
+    EscrowHandleMismatch,
+    #[msg("Invalid escrow token account")]
+    InvalidEscrowTokenAccount,
     #[msg("Math overflow")]
     MathOverflow,
 }
-
-use anchor_spl::associated_token::AssociatedToken;

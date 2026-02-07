@@ -1,6 +1,12 @@
 {
   "version": "0.1.0",
   "name": "tipbot",
+  "address": "JDj9z4vXUj46cRX4UmnfLgV2fGNw2Qnjewr5qzgeHrSo",
+  "metadata": {
+    "name": "tipbot",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
   "instructions": [
     {
       "name": "initialize",
@@ -18,7 +24,7 @@
         { "name": "userAccount", "isMut": true, "isSigner": false },
         { "name": "owner", "isMut": true, "isSigner": true },
         { "name": "userTokenAccount", "isMut": true, "isSigner": false },
-        { "name": "existingEscrowAccount", "isMut": true, "isSigner": false },
+        { "name": "escrowAccount", "isMut": true, "isSigner": false },
         { "name": "escrowTokenAccount", "isMut": true, "isSigner": false },
         { "name": "mint", "isMut": false, "isSigner": false },
         { "name": "tokenProgram", "isMut": false, "isSigner": false },
@@ -134,6 +140,9 @@
     { "code": 6000, "name": "HandleTooLong", "msg": "Twitter handle too long" },
     { "code": 6001, "name": "InvalidAmount", "msg": "Invalid amount" },
     { "code": 6002, "name": "InsufficientBalance", "msg": "Insufficient balance" },
-    { "code": 6003, "name": "MathOverflow", "msg": "Math overflow" }
-  ]
+    { "code": 6003, "name": "EscrowHandleMismatch", "msg": "Escrow handle mismatch" },
+    { "code": 6004, "name": "InvalidEscrowTokenAccount", "msg": "Invalid escrow token account" },
+    { "code": 6005, "name": "MathOverflow", "msg": "Math overflow" }
+  ],
+  "types": []
 }

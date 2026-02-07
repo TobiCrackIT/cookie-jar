@@ -5,8 +5,16 @@
 
 import { TwitterApi } from 'twitter-api-v2';
 import { parseTipCommand, generateReplyMessage, type TipCommand } from '../parser/tipParser.js';
-import { getWalletAddress, isWalletRegistered } from '../registry/walletRegistry.js';
-import { executeTip, checkSufficientBalance } from '../solana/transfer.js';
+import { getWalletAddress, isWalletRegistered, registerWallet } from '../registry/walletRegistry.js';
+import {
+  executeOnChainTip,
+  checkOnChainBalance,
+  registerOnChain,
+  getOnChainBalance,
+  withdrawOnChain,
+  getEscrowBalance,
+  initializeMasterWallet,
+} from '../solana/onChainService.js';
 
 const BOT_HANDLE = process.env.BOT_HANDLE || '@cookkiiee_bot';
 const REPLY_FROM = process.env.REPLY_FROM_HANDLE || '@ooluwatobig';
@@ -28,6 +36,14 @@ export class TwitterBot {
     const user = await this.client.v2.me();
     this.userId = user.data.id;
     console.log(`[TwitterBot] Initialized as @${user.data.username} (ID: ${this.userId})`);
+
+    // Initialize on-chain master wallet
+    const initResult = await initializeMasterWallet();
+    if (initResult.success) {
+      console.log('[TwitterBot] On-chain master wallet initialized');
+    } else {
+      console.warn('[TwitterBot] Master wallet init warning:', initResult.error);
+    }
   }
 
   // Start streaming mentions
@@ -50,8 +66,10 @@ export class TwitterBot {
 
   private async checkMentions(): Promise<void> {
     try {
-      // Get recent mentions
-      const mentions = await this.client.v2.mentions(this.userId!, {
+      // Get recent mentions using search instead of mentions endpoint
+      // The mentions endpoint requires elevated access, so we search for @bot_handle
+      const query = `@${BOT_HANDLE.replace('@', '')} -from:${BOT_HANDLE.replace('@', '')}`;
+      const mentions = await this.client.v2.search(query, {
         max_results: 10,
         'tweet.fields': ['author_id', 'created_at', 'conversation_id'],
         'user.fields': ['username'],
@@ -90,41 +108,38 @@ export class TwitterBot {
       return;
     }
 
-    // Check if recipient is registered
-    const recipientRegistered = await isWalletRegistered(command.recipientHandle);
-    if (!recipientRegistered) {
-      const error = `${command.recipientHandle} hasn't registered a wallet yet. They need to DM me "register <solana_address>" first.`;
+    // Check if sender is registered on-chain
+    const senderRegistered = await isWalletRegistered(senderHandle);
+    if (!senderRegistered) {
+      const error = `You need to register first. DM me "register <your_solana_address>" to set up your wallet.`;
       await this.replyToTweet(tweetId, generateReplyMessage(command, undefined, error));
       return;
     }
 
-    // Check sender balance
-    const hasBalance = await checkSufficientBalance(command.amount, command.token);
+    // Check sender's on-chain balance
+    const amount = parseFloat(command.amount);
+    const hasBalance = await checkOnChainBalance(senderHandle, amount);
     if (!hasBalance) {
-      const error = `Insufficient ${command.token} balance. Deposit to your linked wallet first.`;
+      const error = `Insufficient USDC balance. Deposit to your linked wallet first.`;
       await this.replyToTweet(tweetId, generateReplyMessage(command, undefined, error));
       return;
     }
 
-    // Get recipient address
-    const recipientAddress = await getWalletAddress(command.recipientHandle);
-    if (!recipientAddress) {
-      const error = `Could not find wallet for ${command.recipientHandle}`;
-      await this.replyToTweet(tweetId, generateReplyMessage(command, undefined, error));
-      return;
-    }
-
-    // Execute the tip
-    console.log(`[TwitterBot] Executing tip: ${command.amount} ${command.token} from ${senderHandle} to ${command.recipientHandle}`);
+    // Execute the on-chain tip
+    console.log(`[TwitterBot] Executing on-chain tip: ${command.amount} USDC from ${senderHandle} to ${command.recipientHandle}`);
     
-    const result = await executeTip(command, recipientAddress);
+    const result = await executeOnChainTip(command);
 
-    // Reply with result
-    const replyMessage = generateReplyMessage(
-      command,
-      result.signature,
-      result.error
-    );
+    // Build reply message
+    let replyMessage: string;
+    if (result.success) {
+      const escrowNote = result.escrowed 
+        ? `\n\n💡 ${command.recipientHandle} isn't registered yet. Funds are held in escrow until they register.` 
+        : '';
+      replyMessage = `✅ Sent ${command.amount} USDC to ${command.recipientHandle}!${escrowNote}\n\nView: ${result.explorerUrl}`;
+    } else {
+      replyMessage = `❌ Tip failed: ${result.error}`;
+    }
 
     await this.replyToTweet(tweetId, replyMessage);
   }
@@ -147,8 +162,36 @@ export class TwitterBot {
   async processDM(senderId: string, text: string): Promise<void> {
     const normalized = text.toLowerCase().trim();
 
-    // Register command: "register <solana_address>"
-    if (normalized.startsWith('register ')) {
+    // Get sender's username
+    const user = await this.client.v2.user(senderId);
+    const handle = `@${user.data.username}`;
+
+    // Register command: "register" (auto-generates wallet)
+    if (normalized === 'register') {
+      try {
+        const result = await registerOnChain(handle);
+        if (result.success) {
+          const message = `✅ Wallet created and registered!
+
+📍 Your address: ${result.address}
+
+💡 This is a custodial wallet for the hackathon demo. You can:
+• Receive tips immediately
+• Check balance anytime
+• Withdraw to your own wallet anytime
+
+Your funds are safe and you control withdrawals.`;
+          await this.sendDM(senderId, message);
+        } else {
+          await this.sendDM(senderId, `❌ Registration failed: ${result.error}`);
+        }
+      } catch (error) {
+        await this.sendDM(senderId, '❌ Registration failed. You may already have a wallet registered.');
+      }
+    }
+
+    // Legacy: Register with external wallet: "register <solana_address>"
+    if (normalized.startsWith('register ') && normalized !== 'register') {
       const address = text.split(' ')[1];
       
       if (!address || !isValidSolanaAddress(address)) {
@@ -156,14 +199,14 @@ export class TwitterBot {
         return;
       }
 
-      // Get sender's username
-      const user = await this.client.v2.user(senderId);
-      const handle = `@${user.data.username}`;
-
       try {
-        const { registerWallet } = await import('../registry/walletRegistry.js');
-        await registerWallet(handle, address);
-        await this.sendDM(senderId, `✅ Wallet registered! Your tips will be sent to: ${address}`);
+        const { registerOnChainWithExternalWallet } = await import('../solana/onChainService.js');
+        const result = await registerOnChainWithExternalWallet(handle, address);
+        if (result.success) {
+          await this.sendDM(senderId, `✅ External wallet registered! Your on-chain account is ready.\n\nAddress: ${address}\n\nYou can now receive tips and your existing escrowed funds will be auto-claimed.`);
+        } else {
+          await this.sendDM(senderId, `❌ Registration failed: ${result.error}`);
+        }
       } catch (error) {
         await this.sendDM(senderId, '❌ Registration failed. You may already have a wallet registered.');
       }
@@ -171,9 +214,47 @@ export class TwitterBot {
 
     // Balance command
     if (normalized === 'balance') {
-      const { getBalance } = await import('../solana/transfer.js');
-      const balance = await getBalance();
-      await this.sendDM(senderId, `💰 Your balance:\nSOL: ${balance.sol}\nUSDC: ${balance.usdc}`);
+      const { balance, escrowBalance } = await getOnChainBalance(handle);
+      const escrowNote = escrowBalance > 0 ? `\n⏳ Escrowed (waiting): ${escrowBalance} USDC` : '';
+      await this.sendDM(senderId, `💰 Your on-chain balance:\nAvailable: ${balance} USDC${escrowNote}`);
+    }
+
+    // Escrow command - check pending tips
+    if (normalized === 'escrow') {
+      const escrowBalance = await getEscrowBalance(handle);
+      if (escrowBalance > 0) {
+        await this.sendDM(senderId, `⏳ You have ${escrowBalance} USDC waiting in escrow. Register your wallet to claim it!`);
+      } else {
+        await this.sendDM(senderId, `No funds in escrow. When someone tips you before you register, the funds will be held here.`);
+      }
+    }
+
+    // Withdraw command: "withdraw <amount> <address>"
+    if (normalized.startsWith('withdraw ')) {
+      const parts = text.split(' ');
+      if (parts.length < 3) {
+        await this.sendDM(senderId, '❌ Usage: withdraw <amount> <solana_address>');
+        return;
+      }
+      const amount = parseFloat(parts[1]);
+      const recipientAddress = parts[2];
+
+      if (isNaN(amount) || amount <= 0) {
+        await this.sendDM(senderId, '❌ Invalid amount');
+        return;
+      }
+
+      if (!isValidSolanaAddress(recipientAddress)) {
+        await this.sendDM(senderId, '❌ Invalid Solana address');
+        return;
+      }
+
+      const result = await withdrawOnChain(handle, amount, recipientAddress);
+      if (result.success) {
+        await this.sendDM(senderId, `✅ Withdrew ${amount} USDC to ${recipientAddress}\n\nTx: ${result.tx}`);
+      } else {
+        await this.sendDM(senderId, `❌ Withdraw failed: ${result.error}`);
+      }
     }
   }
 

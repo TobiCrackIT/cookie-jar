@@ -4,7 +4,7 @@
  */
 
 import * as anchor from '@coral-xyz/anchor';
-import { Program, web3, BN } from '@coral-xyz/anchor';
+import { Program, web3, BN, type Idl } from '@coral-xyz/anchor';
 import {
   PublicKey,
   SystemProgram,
@@ -19,36 +19,32 @@ import {
 // Devnet USDC mint
 const DEVNET_USDC_MINT = new PublicKey('4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
 
-// Program ID (placeholder - will be updated after deployment)
-const PROGRAM_ID = new PublicKey('TipBot1111111111111111111111111111111111111');
-
-interface TipBotProgram {
-  methods: {
-    initialize(): any;
-    registerUser(twitterHandle: string): any;
-    deposit(amount: BN): any;
-    tip(amount: BN, recipientHandle: string): any;
-    withdraw(amount: BN): any;
-  };
-  accounts: any;
-}
+// Program ID - deployed on devnet
+const PROGRAM_ID = new PublicKey('JDj9z4vXUj46cRX4UmnfLgV2fGNw2Qnjewr5qzgeHrSo');
 
 export class TipBotClient {
-  private program: Program<TipBotProgram>;
+  private program: Program<Idl>;
   private provider: anchor.Provider;
+  private walletPubkey: PublicKey;
   private masterWalletPda: PublicKey;
   private masterWalletBump: number;
 
   constructor(connection: web3.Connection, wallet: anchor.Wallet) {
-    this.provider = new anchor.AnchorProvider(connection, wallet, {});
+    // Store wallet pubkey (assert non-null since wallet must have a key)
+    this.walletPubkey = wallet.publicKey as PublicKey;
+
+    this.provider = new anchor.AnchorProvider(connection, wallet, {
+      commitment: 'confirmed',
+    });
     anchor.setProvider(this.provider);
 
     // Load the program
-    this.program = new Program(require('./idl.json'), PROGRAM_ID, this.provider);
+    const idl = require('./idl.json');
+    this.program = new Program(idl as Idl, this.provider);
 
     // Derive master wallet PDA
     const [pda, bump] = PublicKey.findProgramAddressSync(
-      [Buffer.from('master_wallet'), wallet.publicKey.toBuffer()],
+      [Buffer.from('master_wallet'), this.walletPubkey.toBuffer()],
       PROGRAM_ID
     );
     this.masterWalletPda = pda;
@@ -63,7 +59,7 @@ export class TipBotClient {
       .initialize()
       .accounts({
         masterWallet: this.masterWalletPda,
-        authority: this.provider.wallet.publicKey,
+        authority: this.walletPubkey,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
@@ -78,7 +74,7 @@ export class TipBotClient {
     const handleLower = twitterHandle.toLowerCase().replace('@', '');
 
     // Derive user account PDA
-    const [userPda, userBump] = PublicKey.findProgramAddressSync(
+    const [userPda] = PublicKey.findProgramAddressSync(
       [
         Buffer.from('user'),
         Buffer.from(handleLower),
@@ -93,13 +89,32 @@ export class TipBotClient {
       PROGRAM_ID
     );
 
+    // Derive escrow account PDA
+    const [escrowPda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('escrow'),
+        Buffer.from(handleLower),
+        this.masterWalletPda.toBuffer(),
+      ],
+      PROGRAM_ID
+    );
+
+    // Derive escrow token account
+    const escrowTokenAccount = await getAssociatedTokenAddress(
+      DEVNET_USDC_MINT,
+      escrowPda,
+      true // allowOwnerOffCurve
+    );
+
     const tx = await this.program.methods
       .registerUser(handleLower)
       .accounts({
         masterWallet: this.masterWalletPda,
         userAccount: userPda,
-        owner: this.provider.wallet.publicKey,
+        owner: this.walletPubkey,
         userTokenAccount: tokenPda,
+        escrowAccount: escrowPda,
+        escrowTokenAccount: escrowTokenAccount,
         mint: DEVNET_USDC_MINT,
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -143,7 +158,7 @@ export class TipBotClient {
     // Get depositor's USDC token account
     const depositorTokenAccount = await getAssociatedTokenAddress(
       DEVNET_USDC_MINT,
-      this.provider.wallet.publicKey
+      this.walletPubkey
     );
 
     const tx = await this.program.methods
@@ -151,7 +166,7 @@ export class TipBotClient {
       .accounts({
         masterWallet: this.masterWalletPda,
         userAccount: userPda,
-        depositor: this.provider.wallet.publicKey,
+        depositor: this.walletPubkey,
         depositorTokenAccount,
         userTokenAccount,
         mint: DEVNET_USDC_MINT,
@@ -209,7 +224,7 @@ export class TipBotClient {
       .accounts({
         masterWallet: this.masterWalletPda,
         userAccount: userPda,
-        owner: this.provider.wallet.publicKey,
+        owner: this.walletPubkey,
         userTokenAccount,
         recipientTokenAccount,
         recipient: recipientAddress,
@@ -255,7 +270,7 @@ export class TipBotClient {
         masterWallet: this.masterWalletPda,
         senderUserAccount: sender.userPda,
         escrowAccount: escrowPda,
-        sender: this.provider.wallet.publicKey,
+        sender: this.walletPubkey,
         senderTokenAccount: sender.tokenAccount,
         escrowTokenAccount,
         mint: DEVNET_USDC_MINT,
@@ -285,7 +300,7 @@ export class TipBotClient {
     );
 
     try {
-      const escrowAccount = await this.program.account.escrowAccount.fetch(escrowPda);
+      const escrowAccount: any = await (this.program.account as any).escrowAccount.fetch(escrowPda);
       return escrowAccount.amount.toNumber() / 1e6;
     } catch (e) {
       return 0; // No escrow
@@ -299,7 +314,7 @@ export class TipBotClient {
     const { userPda } = this.getUserAccounts(twitterHandle);
 
     try {
-      const userAccount = await this.program.account.userAccount.fetch(userPda);
+      const userAccount: any = await (this.program.account as any).userAccount.fetch(userPda);
       return {
         balance: userAccount.balance.toNumber() / 1e6,
         escrowBalance: userAccount.escrowBalance.toNumber() / 1e6,

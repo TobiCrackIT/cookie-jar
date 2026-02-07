@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TipBot Demo - Twitter Tipping on Solana</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+        
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #9945FF, #14F195);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            color: #8899a6;
+            font-size: 1.2rem;
+        }
+        
+        .demo-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 60px;
+        }
+        
+        @media (max-width: 768px) {
+            .demo-section {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .twitter-dm {
+            background: #000;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 1px solid #2f3336;
+        }
+        
+        .dm-header {
+            background: #000;
+            padding: 15px 20px;
+            border-bottom: 1px solid #2f3336;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .bot-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #9945FF, #14F195);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        
+        .bot-info h3 {
+            font-size: 16px;
+            margin-bottom: 2px;
+        }
+        
+        .bot-info span {
+            font-size: 13px;
+            color: #8899a6;
+        }
+        
+        .dm-messages {
+            padding: 20px;
+            height: 400px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            line-height: 1.5;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .user-message {
+            align-self: flex-end;
+            background: #1d9bf0;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .bot-message {
+            align-self: flex-start;
+            background: #2f3336;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .step-info {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 30px;
+        }
+        
+        .step-info h2 {
+            margin-bottom: 20px;
+            color: #14F195;
+        }
+        
+        .step {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 12px;
+            border-left: 3px solid #9945FF;
+        }
+        
+        .step h4 {
+            margin-bottom: 8px;
+            color: #fff;
+        }
+        
+        .step p {
+            color: #8899a6;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .solscan-link {
+            display: inline-block;
+            margin-top: 8px;
+            color: #14F195;
+            text-decoration: none;
+            font-size: 12px;
+        }
+        
+        .solscan-link:hover {
+            text-decoration: underline;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+        
+        .feature-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .feature-card h3 {
+            margin-bottom: 12px;
+            color: #14F195;
+        }
+        
+        .feature-card p {
+            color: #8899a6;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .contract-info {
+            background: rgba(153, 69, 255, 0.1);
+            border: 1px solid #9945FF;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 40px;
+        }
+        
+        .contract-info h3 {
+            margin-bottom: 15px;
+            color: #9945FF;
+        }
+        
+        .contract-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .contract-row span:first-child {
+            color: #8899a6;
+        }
+        
+        .contract-row a {
+            color: #14F195;
+            text-decoration: none;
+        }
+        
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .nav-btn {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        
+        .nav-btn:hover, .nav-btn.active {
+            background: #9945FF;
+            border-color: #9945FF;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🍪 TipBot</h1>
+            <p class="subtitle">Send USDC tips via Twitter mentions on Solana</p>
+        </header>
+
+        <div class="nav-buttons">
+            <button class="nav-btn active" onclick="showScene('register')">1. Registration</button>
+            <button class="nav-btn" onclick="showScene('balance')">2. Check Balance</button>
+            <button class="nav-btn" onclick="showScene('tip')">3. Send Tip</button>
+            <button class="nav-btn" onclick="showScene('escrow')">4. Escrow Demo</button>
+            <button class="nav-btn" onclick="showScene('withdraw')">5. Withdraw</button>
+        </div>
+
+        <div class="demo-section">
+            <div class="twitter-dm">
+                <div class="dm-header">
+                    <div class="bot-avatar">🍪</div>
+                    <div class="bot-info">
+                        <h3>TipBot</h3>
+                        <span>@cookkiiee_bot</span>
+                    </div>
+                </div>
+                <div class="dm-messages" id="messages">
+                    <!-- Messages populated by JS -->
+                </div>
+            </div>
+
+            <div class="step-info">
+                <h2 id="step-title">How it works</h2>
+                <div id="step-content">
+                    <!-- Step content populated by JS -->
+                </div>
+            </div>
+        </div>
+
+        <div class="features">
+            <div class="feature-card">
+                <h3>🔗 Auto-Generated Wallets</h3>
+                <p>Users just DM "register" - the bot creates a Solana wallet automatically. No crypto knowledge needed!</p>
+            </div>
+            <div class="feature-card">
+                <h3>⚡ Instant Tips</h3>
+                <p>Send tips by mentioning @cookkiiee_bot: "@cookkiiee_bot tip @friend 5 USDC"</p>
+            </div>
+            <div class="feature-card">
+                <h3>🛡️ Escrow Protection</h3>
+                <p>Tips to unregistered users go to escrow. They auto-claim when the user registers.</p>
+            </div>
+            <div class="feature-card">
+                <h3>🔐 Custodial Design</h3>
+                <p>Bot holds keys for seamless UX. Users can withdraw to external wallets anytime.</p>
+            </div>
+        </div>
+
+        <div class="contract-info">
+            <h3>🔗 On-Chain Details (Devnet)</h3>
+            <div class="contract-row">
+                <span>Program ID:</span>
+                <a href="https://solscan.io/account/JDj9z4vXUj46cRX4UmnfLgV2fGNw2Qnjewr5qzgeHrSo?cluster=devnet" target="_blank">
+                    JDj9z4v...rSo ↗
+                </a>
+            </div>
+            <div class="contract-row">
+                <span>Master Wallet:</span>
+                <a href="https://solscan.io/account/DAvMipMcnbWStsXSontrn54hVxSwSfKBDzH6Cmco9fsv?cluster=devnet" target="_blank">
+                    DAvMipM...9fsv ↗
+                </a>
+            </div>
+            <div class="contract-row">
+                <span>Network:</span>
+                <span style="color: #14F195;">Solana Devnet</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const scenes = {
+            register: {
+                title: "Step 1: Registration",
+                messages: [
+                    { type: "user", text: "register" },
+                    { type: "bot", text: "✅ Wallet created and registered!\n\n📍 Your address: 5cEswU38WyV1LLrGGYL8iCjUEdzEH5zeTJZKBJj8UTsJ\n\n💡 This is a custodial wallet for the hackathon demo. You can:\n• Receive tips immediately\n• Check balance anytime\n• Withdraw to your own wallet anytime" }
+                ],
+                steps: [
+                    { title: "User sends DM", desc: "User DMs 'register' to @cookkiiee_bot" },
+                    { title: "Bot generates wallet", desc: "Creates new Solana keypair and stores securely" },
+                    { title: "On-chain registration", desc: "Creates UserAccount PDA on Solana program" },
+                    { title: "Confirmation", desc: "User receives wallet address and instructions" }
+                ],
+                txLink: "https://solscan.io/tx/4tttmCzT5F4mckrgSJP2ADVRE8Ar5cRMeX5MNwE81y4eLMP3RKALPn12uSGC9o1RL3ANavZ7DiDVaPVMp8DuRLtE?cluster=devnet"
+            },
+            balance: {
+                title: "Step 2: Check Balance",
+                messages: [
+                    { type: "user", text: "balance" },
+                    { type: "bot", text: "💰 Your on-chain balance:\nAvailable: 0.00 USDC\n\nNo funds yet. Send tips or deposit USDC to get started!" }
+                ],
+                steps: [
+                    { title: "Check command", desc: "User sends 'balance' to check their funds" },
+                    { title: "Query on-chain", desc: "Bot fetches UserAccount data from Solana" },
+                    { title: "Display balance", desc: "Shows available balance + escrowed amount" }
+                ]
+            },
+            tip: {
+                title: "Step 3: Send a Tip",
+                messages: [
+                    { type: "bot", text: "💡 To send a tip, tweet:\n@cookkiiee_bot tip @username 5 USDC" },
+                    { type: "user", text: "(User tweets: @cookkiiee_bot tip @alice 5 USDC)" },
+                    { type: "bot", text: "✅ Sent 5 USDC to @alice!\n\nView: solscan.io/tx/..." }
+                ],
+                steps: [
+                    { title: "Public mention", desc: "Sender tweets tip command publicly" },
+                    { title: "Bot detects", desc: "Bot monitors mentions via Twitter API" },
+                    { title: "Execute transfer", desc: "Calls tip() instruction on Solana" },
+                    { title: "Reply confirmation", desc: "Bot replies with transaction link" }
+                ]
+            },
+            escrow: {
+                title: "Step 4: Escrow Demo",
+                messages: [
+                    { type: "bot", text: "🎁 You received a tip!\n\n@bob sent you 10 USDC but you're not registered yet.\n\nDM me 'register' to claim your funds!" },
+                    { type: "user", text: "register" },
+                    { type: "bot", text: "✅ Wallet created! Auto-claiming 10 USDC...\n\n💰 Your balance: 10.00 USDC" }
+                ],
+                steps: [
+                    { title: "Tip to unregistered user", desc: "Sender tips someone not on platform" },
+                    { title: "Escrow created", desc: "Funds held in EscrowAccount PDA" },
+                    { title: "Notification", desc: "User gets DM about pending tip" },
+                    { title: "Auto-claim on register", desc: "When user registers, escrow auto-transfers" }
+                ]
+            },
+            withdraw: {
+                title: "Step 5: Withdraw",
+                messages: [
+                    { type: "user", text: "withdraw 5 7dthirgD5EM4Gr2B93J8ZMnUHDyEWxzEkgQJLmc4VK5w" },
+                    { type: "bot", text: "✅ Withdrew 5 USDC to your external wallet!\n\nTx: solscan.io/tx/..." }
+                ],
+                steps: [
+                    { title: "Withdraw command", desc: "User specifies amount and external address" },
+                    { title: "Verify balance", desc: "Bot checks sufficient funds on-chain" },
+                    { title: "Execute withdraw", desc: "Calls withdraw() instruction" },
+                    { title: "Confirmation", desc: "Funds sent to external wallet" }
+                ]
+            }
+        };
+
+        function showScene(sceneName) {
+            const scene = scenes[sceneName];
+            
+            // Update buttons
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.textContent.toLowerCase().includes(sceneName)) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            // Update title
+            document.getElementById('step-title').textContent = scene.title;
+            
+            // Update messages
+            const messagesContainer = document.getElementById('messages');
+            messagesContainer.innerHTML = '';
+            scene.messages.forEach((msg, i) => {
+                setTimeout(() => {
+                    const div = document.createElement('div');
+                    div.className = `message ${msg.type}-message`;
+                    div.textContent = msg.text;
+                    messagesContainer.appendChild(div);
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }, i * 300);
+            });
+            
+            // Update steps
+            const stepsContainer = document.getElementById('step-content');
+            stepsContainer.innerHTML = '';
+            scene.steps.forEach(step => {
+                const div = document.createElement('div');
+                div.className = 'step';
+                div.innerHTML = `
+                    <h4>${step.title}</h4>
+                    <p>${step.desc}</p>
+                `;
+                stepsContainer.appendChild(div);
+            });
+            
+            // Add transaction link if available
+            if (scene.txLink) {
+                const link = document.createElement('a');
+                link.className = 'solscan-link';
+                link.href = scene.txLink;
+                link.target = '_blank';
+                link.textContent = '🔗 View on Solscan →';
+                stepsContainer.appendChild(link);
+            }
+        }
+
+        // Show registration scene by default
+        showScene('register');
+    </script>
+</body>
+</html>
