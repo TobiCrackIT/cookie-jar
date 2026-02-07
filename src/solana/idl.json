@@ -1,0 +1,104 @@
+{
+  "version": "0.1.0",
+  "name": "tipbot",
+  "instructions": [
+    {
+      "name": "initialize",
+      "accounts": [
+        { "name": "masterWallet", "isMut": true, "isSigner": false },
+        { "name": "authority", "isMut": true, "isSigner": true },
+        { "name": "systemProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": []
+    },
+    {
+      "name": "registerUser",
+      "accounts": [
+        { "name": "masterWallet", "isMut": true, "isSigner": false },
+        { "name": "userAccount", "isMut": true, "isSigner": false },
+        { "name": "owner", "isMut": true, "isSigner": true },
+        { "name": "userTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "mint", "isMut": false, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "associatedTokenProgram", "isMut": false, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false },
+        { "name": "rent", "isMut": false, "isSigner": false }
+      ],
+      "args": [{ "name": "twitterHandle", "type": "string" }]
+    },
+    {
+      "name": "deposit",
+      "accounts": [
+        { "name": "masterWallet", "isMut": false, "isSigner": false },
+        { "name": "userAccount", "isMut": true, "isSigner": false },
+        { "name": "depositor", "isMut": true, "isSigner": true },
+        { "name": "depositorTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "userTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "mint", "isMut": false, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [{ "name": "amount", "type": "u64" }]
+    },
+    {
+      "name": "tip",
+      "accounts": [
+        { "name": "masterWallet", "isMut": true, "isSigner": false },
+        { "name": "senderUserAccount", "isMut": true, "isSigner": false },
+        { "name": "recipientUserAccount", "isMut": true, "isSigner": false },
+        { "name": "senderTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "recipientTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "mint", "isMut": false, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "amount", "type": "u64" },
+        { "name": "recipientTwitterHandle", "type": "string" }
+      ]
+    },
+    {
+      "name": "withdraw",
+      "accounts": [
+        { "name": "masterWallet", "isMut": false, "isSigner": false },
+        { "name": "userAccount", "isMut": true, "isSigner": false },
+        { "name": "owner", "isMut": false, "isSigner": true },
+        { "name": "userTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "recipientTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "recipient", "isMut": false, "isSigner": false },
+        { "name": "mint", "isMut": false, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false }
+      ],
+      "args": [{ "name": "amount", "type": "u64" }]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "MasterWallet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "authority", "type": "publicKey" },
+          { "name": "totalUsers", "type": "u64" },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    },
+    {
+      "name": "UserAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "twitterHandle", "type": "string" },
+          { "name": "owner", "type": "publicKey" },
+          { "name": "balance", "type": "u64" },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    { "code": 6000, "name": "HandleTooLong", "msg": "Twitter handle too long" },
+    { "code": 6001, "name": "InvalidAmount", "msg": "Invalid amount" },
+    { "code": 6002, "name": "InsufficientBalance", "msg": "Insufficient balance" },
+    { "code": 6003, "name": "MathOverflow", "msg": "Math overflow" }
+  ]
+}
