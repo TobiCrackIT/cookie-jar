@@ -18,6 +18,8 @@
         { "name": "userAccount", "isMut": true, "isSigner": false },
         { "name": "owner", "isMut": true, "isSigner": true },
         { "name": "userTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "existingEscrowAccount", "isMut": true, "isSigner": false },
+        { "name": "escrowTokenAccount", "isMut": true, "isSigner": false },
         { "name": "mint", "isMut": false, "isSigner": false },
         { "name": "tokenProgram", "isMut": false, "isSigner": false },
         { "name": "associatedTokenProgram", "isMut": false, "isSigner": false },
@@ -56,6 +58,26 @@
       ]
     },
     {
+      "name": "tipToEscrow",
+      "accounts": [
+        { "name": "masterWallet", "isMut": true, "isSigner": false },
+        { "name": "senderUserAccount", "isMut": true, "isSigner": false },
+        { "name": "escrowAccount", "isMut": true, "isSigner": false },
+        { "name": "sender", "isMut": true, "isSigner": true },
+        { "name": "senderTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "escrowTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "mint", "isMut": false, "isSigner": false },
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "associatedTokenProgram", "isMut": false, "isSigner": false },
+        { "name": "systemProgram", "isMut": false, "isSigner": false },
+        { "name": "rent", "isMut": false, "isSigner": false }
+      ],
+      "args": [
+        { "name": "amount", "type": "u64" },
+        { "name": "recipientTwitterHandle", "type": "string" }
+      ]
+    },
+    {
       "name": "withdraw",
       "accounts": [
         { "name": "masterWallet", "isMut": false, "isSigner": false },
@@ -78,6 +100,7 @@
         "fields": [
           { "name": "authority", "type": "publicKey" },
           { "name": "totalUsers", "type": "u64" },
+          { "name": "totalEscrows", "type": "u64" },
           { "name": "bump", "type": "u8" }
         ]
       }
@@ -90,6 +113,18 @@
           { "name": "twitterHandle", "type": "string" },
           { "name": "owner", "type": "publicKey" },
           { "name": "balance", "type": "u64" },
+          { "name": "escrowBalance", "type": "u64" },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    },
+    {
+      "name": "EscrowAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "recipientTwitterHandle", "type": "string" },
+          { "name": "amount", "type": "u64" },
           { "name": "bump", "type": "u8" }
         ]
       }
