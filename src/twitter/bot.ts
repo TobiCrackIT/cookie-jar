@@ -9,6 +9,7 @@ import { getWalletAddress, isWalletRegistered } from '../registry/walletRegistry
 import { executeTip, checkSufficientBalance } from '../solana/transfer.js';
 
 const BOT_HANDLE = process.env.BOT_HANDLE || '@cookkiiee_bot';
+const REPLY_FROM = process.env.REPLY_FROM_HANDLE || '@ooluwatobig';
 
 export class TwitterBot {
   private client: TwitterApi;
