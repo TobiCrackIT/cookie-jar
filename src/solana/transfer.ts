@@ -84,26 +84,54 @@ export async function executeTip(
   }
 }
 
+// Devnet USDC mint address
+const DEVNET_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
+const DEVNET_RPC = 'https://api.devnet.solana.com';
+const SOLANA_ADDRESS = 'GfeetWsqP1DKKiayvVqDNtEAxBVh4NvGcASoCnRNeMn2';
+
 export async function getBalance(): Promise<{ sol: string; usdc: string }> {
   try {
-    const response = await fetch(
-      `${AGENTWALLET_API_URL}/wallets/${AGENTWALLET_USERNAME}/balances`,
-      {
-        headers: {
-          'Authorization': `Bearer ${AGENTWALLET_TOKEN}`,
-        },
-      }
-    );
+    // Get SOL balance from devnet
+    const solResponse = await fetch(DEVNET_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getBalance',
+        params: [SOLANA_ADDRESS],
+      }),
+    });
+    const solData = await solResponse.json();
+    const solBalance = (solData.result?.value || 0) / 1e9;
 
-    if (!response.ok) {
-      throw new Error('Failed to fetch balance');
+    // Get USDC balance from devnet
+    const usdcResponse = await fetch(DEVNET_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTokenAccountsByOwner',
+        params: [
+          SOLANA_ADDRESS,
+          { mint: DEVNET_USDC_MINT },
+          { encoding: 'jsonParsed' },
+        ],
+      }),
+    });
+    const usdcData = await usdcResponse.json();
+    
+    let usdcBalance = 0;
+    if (usdcData.result?.value?.length > 0) {
+      const tokenAccount = usdcData.result.value[0];
+      const amount = tokenAccount.account.data.parsed.info.tokenAmount.uiAmount;
+      usdcBalance = amount || 0;
     }
 
-    const data = await response.json();
-    
     return {
-      sol: data.sol || '0',
-      usdc: data.usdc || '0',
+      sol: solBalance.toString(),
+      usdc: usdcBalance.toString(),
     };
   } catch (error) {
     console.error('[Balance] Error:', error);
